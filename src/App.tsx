@@ -15,6 +15,8 @@ import WelcomePage from './pages/WelcomePage'
 import type { AuthState, ConsentState, SurveyState } from './types'
 import { clearEmployee, getCurrentEmployee } from './utils/auth'
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
+
 const initialAuth: AuthState = { employeeId: '', name: '' }
 
 /** Build initial auth state from localStorage (survives page refresh). */
@@ -72,11 +74,52 @@ function AppRoutes() {
 
   const isLoggedIn = useMemo(() => auth.employeeId.trim() && auth.name.trim(), [auth.employeeId, auth.name])
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!consent.consentGiven) return
-    const payload = { survey, consent, submittedAt: new Date().toISOString() }
-    localStorage.setItem('havenSubmission', JSON.stringify(payload))
-    navigate('/success', { state: { submitted: true, submittedAt: payload.submittedAt } })
+
+    const emp = getCurrentEmployee()
+    if (!emp?.accessToken) {
+      navigate('/login')
+      return
+    }
+
+    try {
+      const resp = await fetch(`${API_BASE}/checkin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${emp.accessToken}`,
+        },
+        body: JSON.stringify({
+          employee_id: emp.employeeId,
+          q1: survey.q1_sleep,
+          q2: survey.q2_sleep,
+          q3: survey.q3_workload,
+          q4: survey.q4_workload,
+          q5: survey.q5_relationships,
+          q6: survey.q6_relationships,
+          q7: survey.q7_motivation,
+          q8: survey.q8_motivation,
+        }),
+      })
+
+      if (resp.status === 401) {
+        clearEmployee()
+        navigate('/login')
+        return
+      }
+
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}))
+        alert(data.detail || 'Failed to submit check-in. Please try again.')
+        return
+      }
+    } catch {
+      alert('Unable to connect to the server. Please try again later.')
+      return
+    }
+
+    navigate('/success', { state: { submitted: true, submittedAt: new Date().toISOString() } })
   }
 
   const handleLogout = () => {

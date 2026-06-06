@@ -71,7 +71,7 @@ class LoginRequest(BaseModel):
 
 
 class CheckinRequest(BaseModel):
-    employeeId: str
+    employee_id: str
     q1: int
     q2: int
     q3: int
@@ -80,12 +80,6 @@ class CheckinRequest(BaseModel):
     q6: int
     q7: int
     q8: int
-    sleep_score: float
-    workload_score: float
-    relationships_score: float
-    motivation_score: float
-    total_score: float
-    avg_score: float
 
 
 # ──────────────────────────────────────────────
@@ -214,21 +208,46 @@ def login(req: LoginRequest):
 
 
 @app.post("/api/checkin")
-def submit_checkin(req: CheckinRequest):
-    """Save a daily wellbeing check-in for an employee."""
-    db = get_supabase()
+async def submit_checkin(req: CheckinRequest, user: dict = Depends(verify_token)):
+    """
+    Submit a weekly check-in. Requires a valid access token.
+    Scores are calculated on the server — the frontend only sends q1–q8.
+    """
+    # Validate q1–q8 are between 1 and 5
+    for i, val in enumerate([req.q1, req.q2, req.q3, req.q4, req.q5, req.q6, req.q7, req.q8], 1):
+        if not (1 <= val <= 5):
+            raise HTTPException(status_code=400, detail=f"q{i} must be between 1 and 5.")
 
+    # Calculate scores server-side
+    sleep_score = (req.q1 + req.q2) / 2
+    workload_score = (req.q3 + req.q4) / 2
+    relationships_score = (req.q5 + req.q6) / 2
+    motivation_score = (req.q7 + req.q8) / 2
+    total_score = req.q1 + req.q2 + req.q3 + req.q4 + req.q5 + req.q6 + req.q7 + req.q8
+    avg_score = total_score / 8
+
+    # Determine burnout risk
+    if avg_score >= 4.0:
+        burnout_risk = "low"
+    elif avg_score >= 2.8:
+        burnout_risk = "medium"
+    else:
+        burnout_risk = "high"
+
+    # Save to database
+    db = get_supabase()
     result = db.table("checkins").insert(
         {
-            "employee_id": req.employeeId,
+            "employee_id": req.employee_id,
             "q1": req.q1, "q2": req.q2, "q3": req.q3, "q4": req.q4,
             "q5": req.q5, "q6": req.q6, "q7": req.q7, "q8": req.q8,
-            "sleep_score": req.sleep_score,
-            "workload_score": req.workload_score,
-            "relationships_score": req.relationships_score,
-            "motivation_score": req.motivation_score,
-            "total_score": req.total_score,
-            "avg_score": req.avg_score,
+            "sleep_score": sleep_score,
+            "workload_score": workload_score,
+            "relationships_score": relationships_score,
+            "motivation_score": motivation_score,
+            "total_score": total_score,
+            "avg_score": avg_score,
+            "burnout_risk": burnout_risk,
         }
     ).execute()
 
@@ -236,19 +255,3 @@ def submit_checkin(req: CheckinRequest):
         raise HTTPException(status_code=500, detail="Failed to save check-in.")
 
     return {"success": True}
-
-
-@app.get("/api/checkin/{employeeId}")
-def get_checkins(employeeId: str):
-    """Retrieve all past check-ins for a given employee, newest first."""
-    db = get_supabase()
-
-    result = (
-        db.table("checkins")
-        .select("*")
-        .eq("employee_id", employeeId)
-        .order("submitted_at", desc=True)
-        .execute()
-    )
-
-    return {"success": True, "checkins": result.data}
