@@ -130,16 +130,15 @@ def signup(req: SignupRequest):
     """
     Register a new employee via Supabase Auth, then save profile to the employees table.
     """
-    # Validate Supabase credentials are configured
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise HTTPException(
             status_code=500,
             detail="Server configuration error: Supabase credentials are not set.",
         )
 
-    # ── Pre-check: does an employee profile already exist for this email? ──
-    # Email is the unique login identifier. employee_id is NOT unique.
     db = get_supabase()
+
+    # ── 1. Check if email already exists in employees table ──
     try:
         existing = (
             db.table("employees")
@@ -148,17 +147,17 @@ def signup(req: SignupRequest):
             .limit(1)
             .execute()
         )
+        if existing and existing.data:
+            raise HTTPException(
+                status_code=409,
+                detail="This email is already registered. Please try logging in.",
+            )
+    except HTTPException:
+        raise
     except Exception:
-        existing = None  # If the query fails, proceed with signup
+        pass  # If the query fails, proceed with signup
 
-    if existing and existing.data:
-        raise HTTPException(
-            status_code=409,
-            detail="An account with this email already exists. Please try logging in.",
-        )
-
-    # ── 1. Create user in Supabase Auth (with name in user metadata) ──
-    auth_resp = None
+    # ── 2. Create user in Supabase Auth ──
     try:
         auth_resp = httpx.post(
             f"{SUPABASE_URL}/auth/v1/signup",
@@ -179,69 +178,14 @@ def signup(req: SignupRequest):
             detail=f"Failed to connect to authentication service: {exc}",
         )
 
-    # ── Handle Supabase Auth responses ──
-    if auth_resp is not None and auth_resp.status_code not in (200, 201):
-        # Parse Supabase error message
-        detail = "Signup failed."
-        try:
-            body = auth_resp.json()
-            detail = body.get("msg") or body.get("error_description") or body.get("message") or detail
-        except Exception:
-            pass
+    if auth_resp.status_code not in (200, 201):
+        # Supabase Auth rejected the signup (e.g. 422 = user already in Auth)
+        raise HTTPException(
+            status_code=409,
+            detail="This email is already registered. Please try logging in.",
+        )
 
-        # 422 from Supabase means the auth user already exists.
-        # Try to recover: create the employee profile if it's missing (partial signup recovery).
-        if auth_resp.status_code == 422:
-            existing_profile = None
-            try:
-                existing_profile = (
-                    db.table("employees")
-                    .select("id")
-                    .eq("email", req.email)
-                    .limit(1)
-                    .execute()
-                )
-            except Exception:
-                pass
-
-            if existing_profile and existing_profile.data:
-                # Profile already exists — user should just log in
-                raise HTTPException(
-                    status_code=409,
-                    detail="An account with this email already exists. Please try logging in.",
-                )
-            else:
-                # Auth user exists but no employee profile (partial signup).
-                # Create the profile so the user can log in.
-                try:
-                    result = db.table("employees").insert(
-                        {
-                            "company": req.company,
-                            "department": req.department,
-                            "first_name": req.first_name,
-                            "last_name": req.last_name,
-                            "employee_id": req.employee_id,
-                            "email": req.email,
-                        }
-                    ).execute()
-
-                    if result.data:
-                        return {"success": True, "first_name": req.first_name, "email": req.email}
-                except Exception:
-                    pass
-
-                raise HTTPException(
-                    status_code=400,
-                    detail="Your email is registered but your profile is incomplete. Please try logging in or contact support.",
-                )
-
-        # Other auth errors (400, etc.)
-        if auth_resp.status_code == 400:
-            detail = detail or "Invalid signup data. Please check your inputs."
-
-        raise HTTPException(status_code=400, detail=detail)
-
-    # ── 2. Save employee profile to the employees table ──
+    # ── 3. Save employee profile to the employees table ──
     try:
         result = db.table("employees").insert(
             {
@@ -262,17 +206,6 @@ def signup(req: SignupRequest):
     except HTTPException:
         raise
     except Exception as exc:
-        error_msg = str(exc).lower()
-        if "duplicate" in error_msg or "unique" in error_msg or "already exists" in error_msg:
-            if "email" in error_msg:
-                raise HTTPException(
-                    status_code=409,
-                    detail="An account with this email already exists.",
-                )
-            raise HTTPException(
-                status_code=409,
-                detail="An account with these details already exists.",
-            )
         raise HTTPException(
             status_code=500,
             detail=f"Failed to save employee profile: {exc}",
