@@ -32,7 +32,7 @@ export default function SignUpPage() {
 
   const isEmployeeIdValid = /^\d{8}$/.test(employeeId)
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-  const passwordValid = password.length >= 4
+  const passwordValid = password.length >= 6
   const passwordsMatch = password === confirmPassword && confirmPassword.length > 0
 
   const errors = {
@@ -40,7 +40,7 @@ export default function SignUpPage() {
     lastName: touched.lastName && !lastName.trim() ? 'Last name is required.' : '',
     employeeId: touched.employeeId && !isEmployeeIdValid ? 'Employee ID must be exactly 8 digits.' : '',
     email: touched.email && !isEmailValid ? 'Please enter a valid email address.' : '',
-    password: touched.password && !passwordValid ? 'Password must be at least 4 characters.' : '',
+    password: touched.password && !passwordValid ? 'Password must be at least 6 characters.' : '',
     confirmPassword: touched.confirmPassword && !passwordsMatch ? 'Passwords do not match.' : '',
   }
 

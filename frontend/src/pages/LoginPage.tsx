@@ -22,9 +22,9 @@ export default function LoginPage({ auth, onComplete }: LoginPageProps) {
 
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
   const emailError = touched.email && !isEmailValid ? 'Please enter a valid email address.' : ''
-  const passwordError = touched.password && password.length < 4 ? 'Password must be at least 4 characters.' : ''
+  const passwordError = touched.password && password.length < 6 ? 'Password must be at least 6 characters.' : ''
 
-  const isValid = useMemo(() => isEmailValid && password.length >= 4, [isEmailValid, password])
+  const isValid = useMemo(() => isEmailValid && password.length >= 6, [isEmailValid, password])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
