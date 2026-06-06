@@ -5,13 +5,12 @@ export type EmployeeInfo = {
   employeeId: string
   company: string
   department: string
+  accessToken: string
 }
 
 /**
  * Returns the currently logged-in employee's info.
- * Reads from localStorage — set at sign-up / login time.
- * When a real backend is ready, replace this function's body
- * with an API call; no other UI changes needed.
+ * Reads from localStorage — set at login time.
  */
 export function getCurrentEmployee(): EmployeeInfo | null {
   try {
@@ -23,7 +22,7 @@ export function getCurrentEmployee(): EmployeeInfo | null {
   }
 }
 
-/** Persist employee info after sign-up or login. */
+/** Persist employee info after login. */
 export function saveEmployee(info: EmployeeInfo): void {
   localStorage.setItem('havenEmployee', JSON.stringify(info))
 }

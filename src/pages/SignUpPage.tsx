@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import HavenLogo from '../components/HavenLogo'
-import { saveEmployee } from '../utils/auth'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
 export default function SignUpPage() {
   const navigate = useNavigate()
   const [step, setStep] = useState(1)
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMsg, setErrorMsg] = useState('')
 
   // Card 1 — Company Info
   const [company, setCompany] = useState('')
@@ -51,21 +54,42 @@ export default function SignUpPage() {
     if (isStep1Valid) setStep(2)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setTouched({ firstName: true, lastName: true, employeeId: true, email: true, password: true, confirmPassword: true })
     if (!isStep2Valid) return
-    sessionStorage.setItem('havenSignupName', `${firstName.trim()} ${lastName.trim()}`)
-    sessionStorage.setItem('havenSignupId', employeeId)
-    saveEmployee({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      email: email.trim(),
-      employeeId,
-      company,
-      department,
-    })
-    navigate('/login')
+
+    setSubmitting(true)
+    setErrorMsg('')
+
+    try {
+      const resp = await fetch(`${API_BASE}/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company,
+          department,
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          employee_id: employeeId,
+          email: email.trim(),
+          password,
+        }),
+      })
+
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}))
+        setErrorMsg(data.detail || 'Signup failed. Please try again.')
+        return
+      }
+
+      // Signup succeeded — redirect to login
+      navigate('/login')
+    } catch {
+      setErrorMsg('Unable to connect to the server. Please try again later.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const inputClass = 'w-full rounded-xl border border-haven-200 bg-white/80 px-3 py-2'
@@ -143,6 +167,13 @@ export default function SignUpPage() {
             <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} onBlur={() => setTouched((p) => ({ ...p, confirmPassword: true }))} className={inputClass} />
             {errors.confirmPassword && <p className="mt-1 text-xs text-red-600">{errors.confirmPassword}</p>}
           </div>
+
+          {/* Server error message */}
+          {errorMsg && (
+            <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+              <p className="text-sm text-red-700">{errorMsg}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -157,9 +188,17 @@ export default function SignUpPage() {
           </>
         ) : (
           <>
+            {/* General error for step 2 */}
+            {errorMsg && (
+              <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+                <p className="text-sm text-red-700">{errorMsg}</p>
+              </div>
+            )}
             <div className="flex gap-2">
               <button type="button" onClick={() => setStep(1)} className="btn-3d-outline py-1 px-4 text-xs">Back</button>
-              <button type="submit" disabled={!isStep2Valid} className="btn-3d flex-1 py-1 px-4 text-xs">Create Account</button>
+              <button type="submit" disabled={!isStep2Valid || submitting} className="btn-3d flex-1 py-1 px-4 text-xs">
+                {submitting ? 'Creating Account...' : 'Create Account'}
+              </button>
             </div>
           </>
         )}

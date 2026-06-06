@@ -51,6 +51,19 @@ CREATE TABLE IF NOT EXISTS public.checkins (
     CONSTRAINT chk_q8_range CHECK (q8 BETWEEN 1 AND 5)
 );
 
--- 4. Indexes for common queries
+-- 4. Fix the Supabase Auth trigger that fails because it references
+--    columns that no longer exist. Our backend handles employee creation,
+--    so the trigger just needs to return the new user without doing anything.
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN NEW;
+END;
+$$;
+
+-- 5. Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_checkins_employee_id  ON public.checkins (employee_id);
 CREATE INDEX IF NOT EXISTS idx_checkins_submitted_at ON public.checkins (submitted_at DESC);

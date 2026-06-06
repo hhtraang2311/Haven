@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import EmployeeInfoBar from './components/EmployeeInfoBar'
 import AIChatPage from './pages/AIChatPage'
@@ -13,9 +13,18 @@ import SuccessPage from './pages/SuccessPage'
 import SurveyIntroPage from './pages/SurveyIntroPage'
 import WelcomePage from './pages/WelcomePage'
 import type { AuthState, ConsentState, SurveyState } from './types'
-import { clearEmployee } from './utils/auth'
+import { clearEmployee, getCurrentEmployee } from './utils/auth'
 
 const initialAuth: AuthState = { employeeId: '', name: '' }
+
+/** Build initial auth state from localStorage (survives page refresh). */
+function getInitialAuth(): AuthState {
+  const emp = getCurrentEmployee()
+  if (emp && emp.employeeId && emp.firstName) {
+    return { employeeId: emp.employeeId, name: emp.firstName }
+  }
+  return initialAuth
+}
 const initialSurvey: SurveyState = {
   q1_sleep: 0,
   q2_sleep: 0,
@@ -57,7 +66,7 @@ function AppShell({ children, auth }: { children: ReactNode; auth: AuthState }) 
 function AppRoutes() {
   const navigate = useNavigate()
 
-  const [auth, setAuth] = useState<AuthState>(initialAuth)
+  const [auth, setAuth] = useState<AuthState>(getInitialAuth)
   const [survey, setSurvey] = useState<SurveyState>(initialSurvey)
   const [consent, setConsent] = useState<ConsentState>(initialConsent)
 

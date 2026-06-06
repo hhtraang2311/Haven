@@ -2,48 +2,49 @@
 Haven Backend API
 -----------------
 FastAPI application that handles authentication and daily check-ins
-for the Haven employee wellbeing app. Connects to Supabase for data storage.
+for the Haven employee wellbeing app. Uses Supabase Auth for user management
+and Supabase REST (via the Python SDK) for database access.
 """
 
 import os
 
+import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from passlib.context import CryptContext
 from supabase import create_client, Client
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Supabase credentials (loaded from .env)
+# Supabase credentials
 SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY: str = os.getenv("SUPABASE_PUBLISHABLE_KEY", "")
 
-# Password hashing context — uses bcrypt under the hood
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def get_supabase() -> Client:
-    """
-    Lazily create and return a Supabase client.
-    This avoids crashing at startup when .env is not configured yet.
-    """
+    """Create a Supabase client for database operations."""
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise HTTPException(
             status_code=500,
-            detail="Supabase credentials are not configured. Copy .env.example to .env and fill in your keys.",
+            detail="Supabase credentials are not configured.",
         )
     return create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Create FastAPI app
-app = FastAPI(title="Haven API", version="1.0.0")
 
-# Allow the frontend dev server to call this API
+# Create FastAPI app
+app = FastAPI(title="Haven API", version="2.0.0")
+
+# CORS — allow local dev and Vercel deployments
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to your frontend domain
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+    ],
+    # Allow any *.vercel.app origin at runtime
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,15 +52,15 @@ app.add_middleware(
 
 
 # ──────────────────────────────────────────────
-# Request Models (Pydantic)
+# Request Models
 # ──────────────────────────────────────────────
 
 class SignupRequest(BaseModel):
     company: str
     department: str
-    firstName: str
-    lastName: str
-    employeeId: str
+    first_name: str
+    last_name: str
+    employee_id: str
     email: str
     password: str
 
@@ -88,6 +89,36 @@ class CheckinRequest(BaseModel):
 
 
 # ──────────────────────────────────────────────
+# Auth helper — verify Supabase access_token
+# ──────────────────────────────────────────────
+
+async def verify_token(request: Request) -> dict:
+    """
+    Extract and verify the Supabase access_token from the Authorization header.
+    Returns the user object from Supabase Auth if valid.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid token.")
+
+    token = auth_header.split(" ", 1)[1]
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": SUPABASE_KEY,
+            },
+        )
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired token.")
+
+    return resp.json()
+
+
+# ──────────────────────────────────────────────
 # Routes
 # ──────────────────────────────────────────────
 
@@ -100,98 +131,98 @@ def health_check():
 @app.post("/api/auth/signup")
 def signup(req: SignupRequest):
     """
-    Register a new employee.
-    Hashes the password before storing it in the Supabase employees table.
+    Register a new employee via Supabase Auth, then save profile to the employees table.
     """
-    # Get a Supabase client
-    db = get_supabase()
-
-    # Hash the password so we never store plain text
-    hashed_password = pwd_context.hash(req.password)
-
-    # Check if employee already exists
-    existing = (
-        db.table("employees")
-        .select("employee_id")
-        .eq("email", req.email)
-        .execute()
+    # 1. Create user in Supabase Auth
+    auth_resp = httpx.post(
+        f"{SUPABASE_URL}/auth/v1/signup",
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Content-Type": "application/json",
+        },
+        json={"email": req.email, "password": req.password},
     )
-    if existing.data:
-        raise HTTPException(
-            status_code=400,
-            detail="An account with this email already exists.",
-        )
 
-    # Insert the new employee into Supabase
-    result = db.table("employees").insert(
+    if auth_resp.status_code not in (200, 201):
+        # Parse Supabase error message if available
+        detail = "Signup failed."
+        try:
+            detail = auth_resp.json().get("msg", auth_resp.json().get("error_description", detail))
+        except Exception:
+            pass
+        raise HTTPException(status_code=auth_resp.status_code, detail=detail)
+
+    # 2. Save employee profile to the employees table
+    db = get_supabase()
+    db.table("employees").insert(
         {
             "company": req.company,
             "department": req.department,
-            "first_name": req.firstName,
-            "last_name": req.lastName,
-            "employee_id": req.employeeId,
+            "first_name": req.first_name,
+            "last_name": req.last_name,
+            "employee_id": req.employee_id,
             "email": req.email,
-            "password_hash": hashed_password,
+            "password_hash": "supabase_auth",  # placeholder — auth is handled by Supabase
         }
     ).execute()
 
-    if not result.data:
-        raise HTTPException(status_code=500, detail="Failed to create account.")
-
-    return {"success": True, "employeeId": req.employeeId}
+    return {"success": True, "first_name": req.first_name, "email": req.email}
 
 
 @app.post("/api/auth/login")
 def login(req: LoginRequest):
     """
-    Log in an existing employee.
-    Verifies the password against the stored hash.
+    Log in via Supabase Auth and return access_token + employee info.
     """
-    # Get a Supabase client
-    db = get_supabase()
+    # 1. Authenticate with Supabase Auth
+    auth_resp = httpx.post(
+        f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+        headers={
+            "apikey": SUPABASE_KEY,
+            "Content-Type": "application/json",
+        },
+        json={"email": req.email, "password": req.password},
+    )
 
-    # Look up employee by email
+    if auth_resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    auth_data = auth_resp.json()
+    access_token = auth_data.get("access_token")
+
+    # 2. Look up employee profile
+    db = get_supabase()
     result = (
         db.table("employees")
-        .select("*")
+        .select("first_name, employee_id")
         .eq("email", req.email)
         .execute()
     )
 
     if not result.data:
-        raise HTTPException(status_code=401, detail="Invalid email or password.")
+        raise HTTPException(status_code=404, detail="Employee profile not found.")
 
     employee = result.data[0]
 
-    # Verify the password against the stored hash
-    if not pwd_context.verify(req.password, employee["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password.")
-
     return {
         "success": True,
-        "firstName": employee["first_name"],
-        "email": employee["email"],
+        "access_token": access_token,
+        "first_name": employee["first_name"],
+        "email": req.email,
+        "employee_id": employee["employee_id"],
     }
 
 
 @app.post("/api/checkin")
 def submit_checkin(req: CheckinRequest):
-    """
-    Save a daily wellbeing check-in for an employee.
-    """
+    """Save a daily wellbeing check-in for an employee."""
     db = get_supabase()
 
     result = db.table("checkins").insert(
         {
             "employee_id": req.employeeId,
-            "q1": req.q1,
-            "q2": req.q2,
-            "q3": req.q3,
-            "q4": req.q4,
-            "q5": req.q5,
-            "q6": req.q6,
-            "q7": req.q7,
-            "q8": req.q8,
+            "q1": req.q1, "q2": req.q2, "q3": req.q3, "q4": req.q4,
+            "q5": req.q5, "q6": req.q6, "q7": req.q7, "q8": req.q8,
             "sleep_score": req.sleep_score,
             "workload_score": req.workload_score,
             "relationships_score": req.relationships_score,
@@ -209,9 +240,7 @@ def submit_checkin(req: CheckinRequest):
 
 @app.get("/api/checkin/{employeeId}")
 def get_checkins(employeeId: str):
-    """
-    Retrieve all past check-ins for a given employee, ordered newest first.
-    """
+    """Retrieve all past check-ins for a given employee, newest first."""
     db = get_supabase()
 
     result = (
