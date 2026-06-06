@@ -58,6 +58,7 @@ export default function LoginPage({ auth, onComplete }: LoginPageProps) {
         company: '',
         department: '',
         accessToken: data.access_token,
+        refreshToken: data.refresh_token,
       })
 
       // Update React state

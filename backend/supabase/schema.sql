@@ -10,7 +10,6 @@ CREATE TABLE employees (
     last_name text,
     employee_id text UNIQUE,
     email text UNIQUE,
-    password_hash text,
     created_at timestamp DEFAULT now()
 );
 

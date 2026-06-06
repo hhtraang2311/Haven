@@ -127,14 +127,18 @@ def signup(req: SignupRequest):
     """
     Register a new employee via Supabase Auth, then save profile to the employees table.
     """
-    # 1. Create user in Supabase Auth
+    # 1. Create user in Supabase Auth (with name in user metadata)
     auth_resp = httpx.post(
         f"{SUPABASE_URL}/auth/v1/signup",
         headers={
             "apikey": SUPABASE_KEY,
             "Content-Type": "application/json",
         },
-        json={"email": req.email, "password": req.password},
+        json={
+            "email": req.email,
+            "password": req.password,
+            "data": {"first_name": req.first_name, "last_name": req.last_name},
+        },
     )
 
     if auth_resp.status_code not in (200, 201):
@@ -156,7 +160,6 @@ def signup(req: SignupRequest):
             "last_name": req.last_name,
             "employee_id": req.employee_id,
             "email": req.email,
-            "password_hash": "supabase_auth",  # placeholder — auth is handled by Supabase
         }
     ).execute()
 
@@ -201,6 +204,9 @@ def login(req: LoginRequest):
     return {
         "success": True,
         "access_token": access_token,
+        "refresh_token": auth_data.get("refresh_token"),
+        "expires_in": auth_data.get("expires_in"),
+        "token_type": auth_data.get("token_type", "bearer"),
         "first_name": employee["first_name"],
         "email": req.email,
         "employee_id": employee["employee_id"],

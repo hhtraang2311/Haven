@@ -6,6 +6,7 @@ export type EmployeeInfo = {
   company: string
   department: string
   accessToken: string
+  refreshToken: string
 }
 
 /**

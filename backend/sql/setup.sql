@@ -16,7 +16,6 @@ CREATE TABLE public.employees (
     last_name   text NOT NULL,
     employee_id text NOT NULL UNIQUE,
     email       text NOT NULL UNIQUE,
-    password_hash text NOT NULL,
     created_at  timestamptz NOT NULL DEFAULT now()
 );
 
