@@ -47,8 +47,8 @@ function AppShell({ children, auth }: { children: ReactNode; auth: AuthState }) 
 
   return (
     <main className="app-page-bg min-h-screen">
-      <div className="mx-auto w-full max-w-[390px] py-6 px-3 flex min-h-screen items-center justify-center">
-        <section className="app-card relative flex w-full flex-col overflow-hidden">
+      <div className="mx-auto w-full flex min-h-screen items-center justify-center md:max-w-[390px] md:py-6 md:px-3">
+        <section className="app-card app-card-mobile relative flex w-full flex-col overflow-hidden">
           <div className="flex flex-1 flex-col pb-0 pt-4">
             <div className="flex-1 px-5">
               {children}

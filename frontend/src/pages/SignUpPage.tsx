@@ -167,13 +167,6 @@ export default function SignUpPage() {
             <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} onBlur={() => setTouched((p) => ({ ...p, confirmPassword: true }))} className={inputClass} />
             {errors.confirmPassword && <p className="mt-1 text-xs text-red-600">{errors.confirmPassword}</p>}
           </div>
-
-          {/* Server error message */}
-          {errorMsg && (
-            <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2">
-              <p className="text-sm text-red-700">{errorMsg}</p>
-            </div>
-          )}
         </div>
       )}
 

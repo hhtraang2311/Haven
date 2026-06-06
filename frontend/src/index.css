@@ -47,6 +47,16 @@ body {
   max-height: 95vh;
 }
 
+/* Mobile: full-screen card with no border/radius */
+@media (max-width: 767px) {
+  .app-card.app-card-mobile {
+    border: none;
+    border-radius: 0;
+    min-height: 100vh;
+    max-height: 100vh;
+  }
+}
+
 .app-page-bg {
   position: relative;
   overflow: hidden;
