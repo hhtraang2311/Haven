@@ -15,7 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from supabase import create_client, Client
 
-# Load environment variables from .env file
+# Load environment variables from .env file (resolve path relative to this file)
+_dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=_dotenv_path)
+# Also try loading from the backend directory
 load_dotenv()
 
 # Supabase credentials
@@ -127,41 +130,153 @@ def signup(req: SignupRequest):
     """
     Register a new employee via Supabase Auth, then save profile to the employees table.
     """
-    # 1. Create user in Supabase Auth (with name in user metadata)
-    auth_resp = httpx.post(
-        f"{SUPABASE_URL}/auth/v1/signup",
-        headers={
-            "apikey": SUPABASE_KEY,
-            "Content-Type": "application/json",
-        },
-        json={
-            "email": req.email,
-            "password": req.password,
-            "data": {"first_name": req.first_name, "last_name": req.last_name},
-        },
-    )
+    # Validate Supabase credentials are configured
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: Supabase credentials are not set.",
+        )
 
-    if auth_resp.status_code not in (200, 201):
-        # Parse Supabase error message if available
+    # ── Pre-check: does an employee profile already exist for this email? ──
+    # Email is the unique login identifier. employee_id is NOT unique.
+    db = get_supabase()
+    try:
+        existing = (
+            db.table("employees")
+            .select("id")
+            .eq("email", req.email)
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        existing = None  # If the query fails, proceed with signup
+
+    if existing and existing.data:
+        raise HTTPException(
+            status_code=409,
+            detail="An account with this email already exists. Please try logging in.",
+        )
+
+    # ── 1. Create user in Supabase Auth (with name in user metadata) ──
+    auth_resp = None
+    try:
+        auth_resp = httpx.post(
+            f"{SUPABASE_URL}/auth/v1/signup",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Content-Type": "application/json",
+            },
+            json={
+                "email": req.email,
+                "password": req.password,
+                "data": {"first_name": req.first_name, "last_name": req.last_name},
+            },
+            timeout=30.0,
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to connect to authentication service: {exc}",
+        )
+
+    # ── Handle Supabase Auth responses ──
+    if auth_resp is not None and auth_resp.status_code not in (200, 201):
+        # Parse Supabase error message
         detail = "Signup failed."
         try:
-            detail = auth_resp.json().get("msg", auth_resp.json().get("error_description", detail))
+            body = auth_resp.json()
+            detail = body.get("msg") or body.get("error_description") or body.get("message") or detail
         except Exception:
             pass
-        raise HTTPException(status_code=auth_resp.status_code, detail=detail)
 
-    # 2. Save employee profile to the employees table
-    db = get_supabase()
-    db.table("employees").insert(
-        {
-            "company": req.company,
-            "department": req.department,
-            "first_name": req.first_name,
-            "last_name": req.last_name,
-            "employee_id": req.employee_id,
-            "email": req.email,
-        }
-    ).execute()
+        # 422 from Supabase means the auth user already exists.
+        # Try to recover: create the employee profile if it's missing (partial signup recovery).
+        if auth_resp.status_code == 422:
+            existing_profile = None
+            try:
+                existing_profile = (
+                    db.table("employees")
+                    .select("id")
+                    .eq("email", req.email)
+                    .limit(1)
+                    .execute()
+                )
+            except Exception:
+                pass
+
+            if existing_profile and existing_profile.data:
+                # Profile already exists — user should just log in
+                raise HTTPException(
+                    status_code=409,
+                    detail="An account with this email already exists. Please try logging in.",
+                )
+            else:
+                # Auth user exists but no employee profile (partial signup).
+                # Create the profile so the user can log in.
+                try:
+                    result = db.table("employees").insert(
+                        {
+                            "company": req.company,
+                            "department": req.department,
+                            "first_name": req.first_name,
+                            "last_name": req.last_name,
+                            "employee_id": req.employee_id,
+                            "email": req.email,
+                        }
+                    ).execute()
+
+                    if result.data:
+                        return {"success": True, "first_name": req.first_name, "email": req.email}
+                except Exception:
+                    pass
+
+                raise HTTPException(
+                    status_code=400,
+                    detail="Your email is registered but your profile is incomplete. Please try logging in or contact support.",
+                )
+
+        # Other auth errors (400, etc.)
+        if auth_resp.status_code == 400:
+            detail = detail or "Invalid signup data. Please check your inputs."
+
+        raise HTTPException(status_code=400, detail=detail)
+
+    # ── 2. Save employee profile to the employees table ──
+    try:
+        result = db.table("employees").insert(
+            {
+                "company": req.company,
+                "department": req.department,
+                "first_name": req.first_name,
+                "last_name": req.last_name,
+                "employee_id": req.employee_id,
+                "email": req.email,
+            }
+        ).execute()
+
+        if not result.data:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to save employee profile. Please try again.",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        error_msg = str(exc).lower()
+        if "duplicate" in error_msg or "unique" in error_msg or "already exists" in error_msg:
+            if "email" in error_msg:
+                raise HTTPException(
+                    status_code=409,
+                    detail="An account with this email already exists.",
+                )
+            raise HTTPException(
+                status_code=409,
+                detail="An account with these details already exists.",
+            )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save employee profile: {exc}",
+        )
 
     return {"success": True, "first_name": req.first_name, "email": req.email}
 
@@ -171,15 +286,28 @@ def login(req: LoginRequest):
     """
     Log in via Supabase Auth and return access_token + employee info.
     """
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: Supabase credentials are not set.",
+        )
+
     # 1. Authenticate with Supabase Auth
-    auth_resp = httpx.post(
-        f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
-        headers={
-            "apikey": SUPABASE_KEY,
-            "Content-Type": "application/json",
-        },
-        json={"email": req.email, "password": req.password},
-    )
+    try:
+        auth_resp = httpx.post(
+            f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+            headers={
+                "apikey": SUPABASE_KEY,
+                "Content-Type": "application/json",
+            },
+            json={"email": req.email, "password": req.password},
+            timeout=30.0,
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to connect to authentication service: {exc}",
+        )
 
     if auth_resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid email or password.")
@@ -188,13 +316,19 @@ def login(req: LoginRequest):
     access_token = auth_data.get("access_token")
 
     # 2. Look up employee profile
-    db = get_supabase()
-    result = (
-        db.table("employees")
-        .select("first_name, employee_id")
-        .eq("email", req.email)
-        .execute()
-    )
+    try:
+        db = get_supabase()
+        result = (
+            db.table("employees")
+            .select("first_name, employee_id")
+            .eq("email", req.email)
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to look up employee profile: {exc}",
+        )
 
     if not result.data:
         raise HTTPException(status_code=404, detail="Employee profile not found.")

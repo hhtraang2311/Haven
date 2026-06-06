@@ -154,7 +154,7 @@ export default function SignUpPage() {
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-haven-800">Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={() => setTouched((p) => ({ ...p, email: true }))} className={inputClass} placeholder="name@company.com" />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={() => setTouched((p) => ({ ...p, email: true }))} className={inputClass} placeholder="e.g. name@gmail.com" />
             {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
           </div>
           <div>
